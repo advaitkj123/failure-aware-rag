@@ -4,6 +4,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_NAME,
     torch_dtype=torch.float16,
@@ -14,6 +15,7 @@ model.eval()
 
 GEN_KWARGS = {
     "max_new_tokens": 128,
-    "do_sample": False,   # IMPORTANT: no randomness
+    "do_sample": False,
     "temperature": 0.0,
+    "eos_token_id": tokenizer.eos_token_id,
 }
