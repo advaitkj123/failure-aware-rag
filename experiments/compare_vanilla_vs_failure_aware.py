@@ -1,64 +1,55 @@
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # generation uses GPU only
-
 import json
+import numpy as np
+import pandas as pd
 from pathlib import Path
 
-from generation.generate import generate_answer
-from retrieval.bm25_retriever import build_retriever
-from features.answer_instability import semantic_instability
 from policy.gate import should_retrieve
 
-OUTPUT_PATH = Path("results/vanilla_vs_failure_aware.json")
-OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+# -----------------------------
+# Config
+# -----------------------------
+INPUT_JSON = "results/failure_aware_outputs.json"
+OUTPUT_CSV = "results/table_system_comparison.csv"
 
-QUERIES = [
-    ("q1", "Who discovered penicillin?"),
-    ("q2", "What is the capital of Australia?"),
-    ("q3", "Who wrote Hamlet?"),
-    ("q4", "What year did the Titanic sink?"),
-    ("q5", "Is Pluto a planet?"),
-    ("q6", "Who invented the telephone?"),
-    ("q7", "What is the boiling point of water?"),
-    ("q8", "Who painted the Mona Lisa?"),
-    ("q9", "What is the largest planet in the Solar System?"),
-    ("q10", "Who was the first President of the United States?")
-]
 
 def main():
-    retriever = build_retriever(limit=200)
-    results = []
+    records = json.load(open(INPUT_JSON, "r", encoding="utf-8"))
 
-    for qid, query in QUERIES:
-        # Baseline generation (GPU)
-        ans_no = generate_answer(query)
+    # Collect instability values
+    instabilities = [r["semantic_instability"] for r in records]
 
-        # Retrieve + RAG generation (GPU, limited context)
-        passages = retriever.retrieve(query, k=2)  # reduced from 3
-        ans_rag = generate_answer(query, passages)
+    # Dynamic threshold (same as main experiment)
+    threshold = float(np.quantile(instabilities, 0.80))
 
-        # Instability (CPU-only, cheap)
-        instability = semantic_instability(ans_no, ans_rag)
+    vanilla_harm = 0
+    failure_aware_harm = 0
+    retrieval_used_fa = 0
 
-        # Failure-aware decision (no extra generation)
-        use_retrieval = should_retrieve(instability)
-        ans_failure_aware = ans_rag if use_retrieval else ans_no
+    for r in records:
+        instability = r["semantic_instability"]
 
-        results.append({
-            "qid": qid,
-            "query": query,
-            "semantic_instability": instability,
-            "vanilla_rag_answer": ans_rag,
-            "failure_aware_answer": ans_failure_aware,
-            "retrieval_used": use_retrieval
-        })
+        # Vanilla RAG always retrieves
+        vanilla_harm += 1
 
-        print(f"[OK] {qid} | retrieve={use_retrieval}")
+        # Failure-aware decision
+        if should_retrieve(instability, threshold):
+            retrieval_used_fa += 1
+            failure_aware_harm += 1
 
-    with open(OUTPUT_PATH, "w") as f:
-        json.dump(results, f, indent=2)
+    table = pd.DataFrame([{
+        "Total Queries": len(records),
+        "Vanilla RAG: Retrieval Used (%)": 100.0,
+        "Failure-Aware RAG: Retrieval Used (%)":
+            100.0 * retrieval_used_fa / len(records),
+        "Harmful Cases (Vanilla RAG)": vanilla_harm,
+        "Harmful Cases (Failure-Aware RAG)": failure_aware_harm
+    }])
 
-    print(f"[DONE] Saved → {OUTPUT_PATH}")
+    Path(OUTPUT_CSV).parent.mkdir(parents=True, exist_ok=True)
+    table.to_csv(OUTPUT_CSV, index=False)
+
+    print(table)
+
 
 if __name__ == "__main__":
     main()
