@@ -1,15 +1,18 @@
+
 import torch
-from .model import tokenizer, model, GEN_KWARGS
-from .prompts import prompt_no_retrieval, prompt_with_retrieval
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
+MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"
 
-def _extract_answer(full_text: str) -> str:
-    """
-    Removes prompt text and returns only the generated answer.
-    """
-    if "[/INST]" in full_text:
-        return full_text.split("[/INST]")[-1].strip()
-    return full_text.strip()
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_NAME,
+    device_map="auto",
+    dtype=torch.float16
+)
+
+model.eval()
 
 
 def generate_text(prompt: str) -> str:
@@ -17,30 +20,20 @@ def generate_text(prompt: str) -> str:
 
     outputs = model.generate(
         **inputs,
-        max_new_tokens=128,
-        do_sample=False
+        max_new_tokens=64,
+        do_sample=False,
+        use_cache=True,
+        pad_token_id=tokenizer.eos_token_id
     )
 
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
 
 
-def generate_answer(query: str, passages=None):
+def generate_answer(query: str, passages=None) -> str:
     if passages:
-        context = "\n".join(passages)
+        context = "\n".join(passages[:2])  # GPU-safe context limit
         prompt = f"Context:\n{context}\n\nQuestion: {query}\nAnswer:"
     else:
         prompt = f"Question: {query}\nAnswer:"
 
-    # existing generation code
     return generate_text(prompt)
-
-
-
-def generate_pair(query: str, passages: list[str]):
-    answer_no_rag = generate_answer(
-        prompt_no_retrieval(query)
-    )
-    answer_rag = generate_answer(
-        prompt_with_retrieval(query, passages)
-    )
-    return answer_no_rag, answer_rag
