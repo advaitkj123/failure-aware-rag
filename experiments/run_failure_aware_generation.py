@@ -1,6 +1,5 @@
-# experiments/failure_aware_generation.py
-
 import json
+import numpy as np
 from pathlib import Path
 
 from generation.generate import generate_answer
@@ -30,7 +29,7 @@ QUERIES = [
     ("q7", "What is the boiling point of water?"),
     ("q8", "Who painted the Mona Lisa?"),
     ("q9", "What is the largest planet in the Solar System?"),
-    ("q10", "Who was the first President of the United States?"),
+    ("q10", "Who was the first President of the United States?")
 ]
 
 
@@ -39,44 +38,79 @@ QUERIES = [
 # -----------------------------
 def main():
     retriever = build_retriever(limit=200)
-    results = []
+    raw_results = []
 
+    # ---------- PASS 1: generate + measure instability ----------
     for qid, query in QUERIES:
-        # Baseline generation (NO retrieval) — GPU
-        answer_no = generate_answer(query)
+        # Baseline (NO retrieval)
+        baseline_answer = generate_answer(query)
 
-        # Candidate RAG generation — GPU (bounded context)
+        # Vanilla RAG (ALWAYS retrieve)
         passages = retriever.retrieve(query, k=3)
-        answer_rag = generate_answer(query, passages)
+        vanilla_rag_answer = generate_answer(query, passages)
 
-        # Semantic instability — CPU
-        instability = compute_semantic_instability(answer_no, answer_rag)
+        # Instability (CPU)
+        instability = compute_semantic_instability(
+            baseline_answer,
+            vanilla_rag_answer
+        )
 
-        # Failure-aware gate — CPU
-        use_retrieval = should_retrieve(instability)
-
-        # Final answer selection (NO extra generation)
-        final_answer = answer_rag if use_retrieval else answer_no
-
-        #  Human-readable explanation — CPU
-        explanation = explain_decision(instability)
-
-        results.append({
+        raw_results.append({
             "qid": qid,
             "query": query,
-            "semantic_instability": instability,
-            "used_retrieval": use_retrieval,
-            "decision_explanation": explanation,
-            "final_answer": final_answer
+            "baseline_answer": baseline_answer,
+            "vanilla_rag_answer": vanilla_rag_answer,
+            "semantic_instability": instability
         })
 
-        print(f"[OK] {qid} | retrieve={use_retrieval}")
+    # ---------- Dynamic gate threshold (relative, IEEE-safe) ----------
+    instability_values = [r["semantic_instability"] for r in raw_results]
+    gate_threshold = float(np.quantile(instability_values, 0.80))
+
+    print(f"[INFO] Dynamic gate threshold (80th percentile): {gate_threshold:.6f}")
+
+    # ---------- PASS 2: failure-aware selection ----------
+    final_results = []
+
+    for r in raw_results:
+        use_retrieval = should_retrieve(
+            r["semantic_instability"],
+            gate_threshold
+        )
+
+        failure_aware_answer = (
+            r["vanilla_rag_answer"]
+            if use_retrieval
+            else r["baseline_answer"]
+        )
+
+        explanation = explain_decision(
+            r["semantic_instability"],
+            gate_threshold
+        )
+
+        final_results.append({
+            "qid": r["qid"],
+            "query": r["query"],
+            "semantic_instability": r["semantic_instability"],
+
+            # --- pipeline outputs ---
+            "baseline_answer": r["baseline_answer"],
+            "vanilla_rag_answer": r["vanilla_rag_answer"],
+            "failure_aware_answer": failure_aware_answer,
+
+            # --- gate ---
+            "used_retrieval": use_retrieval,
+            "decision_explanation": explanation
+        })
+
+        print(f"[OK] {r['qid']} | retrieve={use_retrieval}")
 
     # -----------------------------
     # Save results
     # -----------------------------
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2)
+        json.dump(final_results, f, indent=2)
 
     print(f"[DONE] Saved failure-aware outputs → {OUTPUT_PATH}")
 

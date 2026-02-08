@@ -1,14 +1,21 @@
 import pandas as pd
 from pathlib import Path
 
+# -----------------------------
+# Config
+# -----------------------------
 INPUT_CSV = "results/answer_instability.csv"
 OUTPUT_CSV = "results/answer_instability_labeled.csv"
 
+
 def label_harm(row):
     """
-    Simple, interpretable harm proxy.
-    Harm = 1 if retrieval degrades logical confidence.
+    Harm is defined ONLY when retrieval is used
+    and logical degradation is observed.
     """
+    if not row["used_retrieval"]:
+        return 0
+
     if row["contradiction"] > 0.1:
         return 1
     if row["entailment"] < 0.6:
@@ -16,6 +23,7 @@ def label_harm(row):
     if row["neutral"] > 0.5:
         return 1
     return 0
+
 
 def main():
     df = pd.read_csv(INPUT_CSV)
@@ -32,6 +40,7 @@ def main():
         "entailment",
         "neutral",
         "contradiction",
+        "used_retrieval",
         "harm"
     ]])
 

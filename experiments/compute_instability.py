@@ -1,10 +1,10 @@
 import json
 import csv
 from pathlib import Path
-
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
+# Force CPU (GPU-safe)
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
 from features.answer_instability import (
     semantic_instability,
@@ -12,10 +12,9 @@ from features.answer_instability import (
     structural_drift,
 )
 
-# ---- CONFIG ----
-from pathlib import Path
-import json
-
+# -----------------------------
+# Config
+# -----------------------------
 INPUT_JSON = "results/failure_aware_outputs.json"
 OUTPUT_CSV = "results/answer_instability.csv"
 
@@ -33,14 +32,25 @@ def main():
     for r in records:
         qid = r.get("qid", "")
         query = r["query"]
-        ans_no = r["vanilla_answer"]
-        ans_rag = r["rag_answer"]
 
+        # --- Canonical answers ---
+        baseline_answer = r["baseline_answer"]
+        vanilla_rag_answer = r["vanilla_rag_answer"]
+        failure_aware_answer = r["failure_aware_answer"]
 
-        # --- Instability metrics ---
-        sem_instab = semantic_instability(ans_no, ans_rag)
-        logic = logical_instability(ans_no, ans_rag)
-        struct = structural_drift(ans_no, ans_rag)
+        # --- Instability: Vanilla RAG vs Baseline ---
+        sem_instab = semantic_instability(
+            baseline_answer,
+            vanilla_rag_answer
+        )
+        logic = logical_instability(
+            baseline_answer,
+            vanilla_rag_answer
+        )
+        struct = structural_drift(
+            baseline_answer,
+            vanilla_rag_answer
+        )
 
         row = {
             "qid": qid,
@@ -51,17 +61,21 @@ def main():
             "contradiction": logic["contradiction"],
             "length_diff": struct["length_diff"],
             "length_ratio": struct["length_ratio"],
+            "used_retrieval": r["used_retrieval"],
         }
 
         rows.append(row)
 
-    # ---- Write CSV ----
+    # -----------------------------
+    # Write CSV
+    # -----------------------------
     with open(output_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=rows[0].keys())
         writer.writeheader()
         writer.writerows(rows)
 
     print(f"[OK] Wrote {len(rows)} rows to {output_path}")
+
 
 if __name__ == "__main__":
     main()
