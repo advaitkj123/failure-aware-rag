@@ -2,6 +2,10 @@ import json
 import csv
 from pathlib import Path
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+
 from features.answer_instability import (
     semantic_instability,
     logical_instability,
@@ -9,8 +13,12 @@ from features.answer_instability import (
 )
 
 # ---- CONFIG ----
-INPUT_JSON = "data/processed/counterfactual_outputs.json"
+from pathlib import Path
+import json
+
+INPUT_JSON = "results/failure_aware_outputs.json"
 OUTPUT_CSV = "results/answer_instability.csv"
+
 
 def main():
     input_path = Path(INPUT_JSON)
@@ -25,8 +33,9 @@ def main():
     for r in records:
         qid = r.get("qid", "")
         query = r["query"]
-        ans_no = r["answer_no_rag"]
-        ans_rag = r["answer_rag"]
+        ans_no = r["vanilla_answer"]
+        ans_rag = r["rag_answer"]
+
 
         # --- Instability metrics ---
         sem_instab = semantic_instability(ans_no, ans_rag)
