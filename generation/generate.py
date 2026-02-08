@@ -12,15 +12,28 @@ def _extract_answer(full_text: str) -> str:
     return full_text.strip()
 
 
-def generate_answer(prompt: str) -> str:
-    inputs = tokenizer(prompt, return_tensors="pt")
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+def generate_text(prompt: str) -> str:
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
-    with torch.no_grad():
-        outputs = model.generate(**inputs, **GEN_KWARGS)
+    outputs = model.generate(
+        **inputs,
+        max_new_tokens=128,
+        do_sample=False
+    )
 
-    decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    return _extract_answer(decoded)
+    return tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+
+def generate_answer(query: str, passages=None):
+    if passages:
+        context = "\n".join(passages)
+        prompt = f"Context:\n{context}\n\nQuestion: {query}\nAnswer:"
+    else:
+        prompt = f"Question: {query}\nAnswer:"
+
+    # existing generation code
+    return generate_text(prompt)
+
 
 
 def generate_pair(query: str, passages: list[str]):
