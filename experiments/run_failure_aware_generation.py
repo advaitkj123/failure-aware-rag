@@ -33,7 +33,7 @@ with open(QUERY_PATH, "r", encoding="utf-8") as f:
 # -----------------------------
 def main():
 
-    retriever = build_retriever(limit=2000)
+    retriever = build_retriever()
 
     raw_results = []
 
