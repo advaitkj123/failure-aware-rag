@@ -1,11 +1,7 @@
-def should_retrieve(semantic_instability: float,
-                    threshold: float) -> bool:
-    """
-    Failure-aware retrieval gate.
+import numpy as np
 
-    Returns:
-        True  -> allow retrieval
-        False -> skip retrieval (fallback to baseline)
-    """
-    # Retrieve ONLY if instability is BELOW threshold
-    return semantic_instability < threshold
+def compute_percentile_threshold(instability_scores, percentile=75):
+    return float(np.percentile(instability_scores, percentile))
+
+def should_retrieve(instability, threshold):
+    return instability > threshold

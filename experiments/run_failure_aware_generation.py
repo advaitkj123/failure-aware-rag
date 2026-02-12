@@ -4,59 +4,57 @@ from pathlib import Path
 
 from generation.generate import generate_answer
 from retrieval.bm25_retriever import build_retriever
-from features.answer_instability import semantic_instability as compute_semantic_instability
+from features.answer_instability import semantic_instability
 from policy.gate import should_retrieve
 from policy.explain_gate import explain_decision
 
 
 # -----------------------------
-# Output setup
+# Config
 # -----------------------------
+QUERY_PATH = "data/processed/query_set_200.json"
 OUTPUT_PATH = Path("results/failure_aware_outputs.json")
 OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-
-# -----------------------------
-# Evaluation queries
-# -----------------------------
-# -----------------------------
-# Dynamic Query Builder (IEEE-scale)
-# -----------------------------
-from retrieval.bm25_retriever import load_wiki_corpus
-
-def build_query_set(n=200):
-    corpus = load_wiki_corpus(limit=n * 2)
-
-    queries = []
-    for i, text in enumerate(corpus[:n]):
-        clean = text.replace("\n", " ").strip()
-        short = clean[:120]
-        queries.append((f"q{i+1}", short + "?"))
-
-    return queries
-
-QUERIES = build_query_set(200)
-
+GATE_PERCENTILE = 75
+CALIBRATION_SPLIT = 0.7   # 70% calibration, 30% evaluation
+TOP_K = 2                 # retrieval depth (GPU safe)
 
 
 # -----------------------------
-# Main experiment
+# Load queries
+# -----------------------------
+with open(QUERY_PATH, "r", encoding="utf-8") as f:
+    QUERY_SET = json.load(f)
+
+
+# -----------------------------
+# Main
 # -----------------------------
 def main():
-    retriever = build_retriever(limit=200)
+
+    retriever = build_retriever(limit=2000)
+
     raw_results = []
 
-    # ---------- PASS 1: generate + measure instability ----------
-    for qid, query in QUERIES:
-        # Baseline (NO retrieval)
+    print(f"[INFO] Loaded {len(QUERY_SET)} queries")
+
+    # ==========================================================
+    # PASS 1 — Generate baseline + vanilla RAG + instability
+    # ==========================================================
+    for item in QUERY_SET:
+
+        qid = item["qid"]
+        query = item["query"]
+
+        # Baseline (no retrieval)
         baseline_answer = generate_answer(query)
 
-        # Vanilla RAG (ALWAYS retrieve)
-        passages = retriever.retrieve(query, k=2)
+        # Vanilla RAG (always retrieve)
+        passages = retriever.retrieve(query, k=TOP_K)
         vanilla_rag_answer = generate_answer(query, passages)
 
-        # Instability (CPU)
-        instability = compute_semantic_instability(
+        instability = semantic_instability(
             baseline_answer,
             vanilla_rag_answer
         )
@@ -69,16 +67,33 @@ def main():
             "semantic_instability": instability
         })
 
-    # ---------- Dynamic gate threshold (relative, IEEE-safe) ----------
-    instability_values = [r["semantic_instability"] for r in raw_results]
-    gate_threshold = float(np.quantile(instability_values, 0.80))
+        print(f"[PASS1] {qid} done")
 
-    print(f"[INFO] Dynamic gate threshold (80th percentile): {gate_threshold:.6f}")
+    # ==========================================================
+    # Adaptive Gate Threshold (Calibration Split)
+    # ==========================================================
+    instabilities = np.array(
+        [r["semantic_instability"] for r in raw_results]
+    )
 
-    # ---------- PASS 2: failure-aware selection ----------
+    split_idx = int(len(instabilities) * CALIBRATION_SPLIT)
+
+    calibration_instability = instabilities[:split_idx]
+
+    gate_threshold = float(
+        np.percentile(calibration_instability, GATE_PERCENTILE)
+    )
+
+    print(f"[INFO] Gate percentile: {GATE_PERCENTILE}")
+    print(f"[INFO] Gate threshold: {gate_threshold:.6f}")
+
+    # ==========================================================
+    # PASS 2 — Apply Failure-Aware Gate
+    # ==========================================================
     final_results = []
 
     for r in raw_results:
+
         use_retrieval = should_retrieve(
             r["semantic_instability"],
             gate_threshold
@@ -98,9 +113,10 @@ def main():
         final_results.append({
             "qid": r["qid"],
             "query": r["query"],
+
             "semantic_instability": r["semantic_instability"],
 
-            # --- pipeline outputs ---
+            # --- answers ---
             "baseline_answer": r["baseline_answer"],
             "vanilla_rag_answer": r["vanilla_rag_answer"],
             "failure_aware_answer": failure_aware_answer,
@@ -110,15 +126,15 @@ def main():
             "decision_explanation": explanation
         })
 
-        print(f"[OK] {r['qid']} | retrieve={use_retrieval}")
+        print(f"[PASS2] {r['qid']} | retrieve={use_retrieval}")
 
-    # -----------------------------
-    # Save results
-    # -----------------------------
+    # ==========================================================
+    # Save
+    # ==========================================================
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         json.dump(final_results, f, indent=2)
 
-    print(f"[DONE] Saved failure-aware outputs → {OUTPUT_PATH}")
+    print(f"[DONE] Saved results → {OUTPUT_PATH}")
 
 
 if __name__ == "__main__":
