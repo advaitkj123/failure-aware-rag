@@ -19,18 +19,24 @@ OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 # -----------------------------
 # Evaluation queries
 # -----------------------------
-QUERIES = [
-    ("q1", "Who discovered penicillin?"),
-    ("q2", "What is the capital of Australia?"),
-    ("q3", "Who wrote Hamlet?"),
-    ("q4", "What year did the Titanic sink?"),
-    ("q5", "Is Pluto a planet?"),
-    ("q6", "Who invented the telephone?"),
-    ("q7", "What is the boiling point of water?"),
-    ("q8", "Who painted the Mona Lisa?"),
-    ("q9", "What is the largest planet in the Solar System?"),
-    ("q10", "Who was the first President of the United States?")
-]
+# -----------------------------
+# Dynamic Query Builder (IEEE-scale)
+# -----------------------------
+from retrieval.bm25_retriever import load_wiki_corpus
+
+def build_query_set(n=200):
+    corpus = load_wiki_corpus(limit=n * 2)
+
+    queries = []
+    for i, text in enumerate(corpus[:n]):
+        clean = text.replace("\n", " ").strip()
+        short = clean[:120]
+        queries.append((f"q{i+1}", short + "?"))
+
+    return queries
+
+QUERIES = build_query_set(200)
+
 
 
 # -----------------------------
@@ -46,7 +52,7 @@ def main():
         baseline_answer = generate_answer(query)
 
         # Vanilla RAG (ALWAYS retrieve)
-        passages = retriever.retrieve(query, k=3)
+        passages = retriever.retrieve(query, k=2)
         vanilla_rag_answer = generate_answer(query, passages)
 
         # Instability (CPU)
