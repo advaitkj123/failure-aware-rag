@@ -9,35 +9,36 @@ from policy.gate import should_retrieve
 from policy.explain_gate import explain_decision
 
 
-# -----------------------------
+# --------------------------------------------------
 # Config
-# -----------------------------
+# --------------------------------------------------
 QUERY_PATH = "data/processed/query_set_200.json"
 OUTPUT_PATH = Path("results/failure_aware_outputs.json")
 OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 GATE_PERCENTILE = 75
-CALIBRATION_SPLIT = 0.7   # 70% calibration, 30% evaluation
-TOP_K = 2                 # retrieval depth (GPU safe)
+CALIBRATION_SPLIT = 0.7
+TOP_K = 2
 
 
-# -----------------------------
-# Load queries
-# -----------------------------
+# --------------------------------------------------
+# Load Queries
+# --------------------------------------------------
 with open(QUERY_PATH, "r", encoding="utf-8") as f:
     QUERY_SET = json.load(f)
 
 
-# -----------------------------
+# --------------------------------------------------
 # Main
-# -----------------------------
+# --------------------------------------------------
 def main():
 
+    print(f"[INFO] Loaded {len(QUERY_SET)} queries")
+
+    # Build retriever ONCE
     retriever = build_retriever()
 
     raw_results = []
-
-    print(f"[INFO] Loaded {len(QUERY_SET)} queries")
 
     # ==========================================================
     # PASS 1 — Generate baseline + vanilla RAG + instability
@@ -45,7 +46,7 @@ def main():
     for item in QUERY_SET:
 
         qid = item["qid"]
-        query = item["query"]
+        query = str(item["query"])  # force string safety
 
         # Baseline (no retrieval)
         baseline_answer = generate_answer(query)
@@ -64,7 +65,7 @@ def main():
             "query": query,
             "baseline_answer": baseline_answer,
             "vanilla_rag_answer": vanilla_rag_answer,
-            "semantic_instability": instability
+            "semantic_instability": float(instability)
         })
 
         print(f"[PASS1] {qid} done")
@@ -78,10 +79,10 @@ def main():
 
     split_idx = int(len(instabilities) * CALIBRATION_SPLIT)
 
-    calibration_instability = instabilities[:split_idx]
+    calibration_values = instabilities[:split_idx]
 
     gate_threshold = float(
-        np.percentile(calibration_instability, GATE_PERCENTILE)
+        np.percentile(calibration_values, GATE_PERCENTILE)
     )
 
     print(f"[INFO] Gate percentile: {GATE_PERCENTILE}")
@@ -116,13 +117,13 @@ def main():
 
             "semantic_instability": r["semantic_instability"],
 
-            # --- answers ---
+            # pipeline outputs
             "baseline_answer": r["baseline_answer"],
             "vanilla_rag_answer": r["vanilla_rag_answer"],
             "failure_aware_answer": failure_aware_answer,
 
-            # --- gate ---
-            "used_retrieval": use_retrieval,
+            # gate
+            "used_retrieval": bool(use_retrieval),
             "decision_explanation": explanation
         })
 
